@@ -32,8 +32,13 @@
 (defn find-since [year]
   (select team (where {:year-id [> year]})))
 
+(defonce current-teams-cache (atom nil))
+
 (defn find-current []
-  (select team (where {:year-id 2014})))
+  (or
+   @current-teams-cache
+   (reset! current-teams-cache
+           (select team (where {:year-id 2014})))))
 
 (defn current-team-lahman-ids []
   (map :lahman-id
@@ -76,6 +81,12 @@
                     sd (standard-dev (vals data))]]
           [id {:avg avg, :sd sd}])))
 
+;; this differs slightly from BA in that it includes home runs
+(defn hit-rate [{:keys [hits homeruns SO BB]}]
+  (if (every? zero? [hits homeruns SO BB])
+    0
+    (/ (+ hits homeruns) (+ SO BB hits homeruns))))
+
 (defn batting-avg [team-map]
   (/ (:hits team-map)
      (:at-bats team-map)))
@@ -96,3 +107,45 @@
      (* 2 (:triples team))
      (/ (* 3 (:homeruns team)) 
         (:at-bats team))))
+
+(defn batters-faced [{:keys [IPOuts hits BB]}]
+  (+ IPOuts hits BB))
+
+(defn league-average-hits []
+  (let [current-teams (find-current)]
+    (/ (reduce + (map :hits current-teams))
+       (reduce + (map batters-faced current-teams)))))
+
+(defn plate-appearances [team-map]
+  (+ (:at-bats team-map)
+     (:BB team-map)
+     (:HBP team-map)))
+
+(defn outs [team-map]
+  (- (plate-appearances team-map)
+     (:hits team-map)
+     (:BB team-map)
+     (:HBP team-map)))
+
+(defn bb [team-map]
+  (+ (:BB team-map)
+     (:HBP team-map)))
+
+(defn h1 [team-map]
+  (- (:hits team-map)
+     (:doubles team-map)
+     (:triples team-map)
+     (:homeruns team-map)))
+
+(def h2 :doubles)
+(def h3 :triples)
+(def hr :homeruns)
+
+(defn national-league? [team-map]
+  (= "NL" (:league-id team-map)))
+
+(defn american-league? [team-map]
+  (= "AL" (:league-id team-map)))
+
+(defn designated-hitter-rule? [team-map]
+  (american-league? team-map))

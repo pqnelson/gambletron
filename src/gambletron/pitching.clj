@@ -25,4 +25,22 @@
   (select pitching (where {:team-id team-id})))
 
 (defn find-by-team [team]
-  (find-by-team-id (:id team)))
+  (find-by-team-id (:lahman-id team)))
+
+(defn find-by-team-year [team]
+  (select pitching (where {:team-id (:lahman-id team)
+                           :year-id (:year-id team)})))
+
+
+(defn find-by-year [year]
+  (select pitching (where {:year-id year})))
+
+;; how many batters hit the ball, and then do something
+;; compared to the total number of batters that have faced the pitcher
+(defn hit-rate [{:keys [BB HR H SO IBB]}]
+  (if (every? zero? [BB HR H SO IBB])
+    0
+    (/ (+ HR H) (+ BB HR H SO IBB))))
+
+(defn batters-faced [{:keys [IPOuts H BB]}]
+  (+ IPOuts H BB))

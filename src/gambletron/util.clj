@@ -1,6 +1,11 @@
 (ns gambletron.util
   (:require [clojure.string :as string]))
 
+(defn sum [coll]
+  (if (empty? coll)
+    0
+    (reduce + coll)))
+
 ;; record helpers
 (defn static? [field]
   (java.lang.reflect.Modifier/isStatic
@@ -65,3 +70,14 @@
     ~(with-meta const-name
        (assoc (meta const-name) :const true))
     ~const-val))
+
+(defn median [coll]
+  (let [sorted-coll (sort coll)
+        N (count coll)
+        mid (quot N 2)]
+    (if (even? N)
+      (/ (+ (nth sorted-coll mid)
+            (nth sorted-coll (dec mid)))
+         2)
+      (nth sorted-coll mid))))
+
