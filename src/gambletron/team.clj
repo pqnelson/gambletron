@@ -1,6 +1,7 @@
 (ns gambletron.team
   (:require [korma.core :refer [insert select set-fields where values] :as korma]
-            [gambletron.schema :refer [team] :as schema]))
+            [gambletron.schema :refer [team] :as schema]
+            [gambletron.util :refer [mean standard-dev]]))
 
 (defn create [team-map]
   (insert team (values team-map)))
@@ -58,20 +59,6 @@
   (into {}
         (for [id (current-team-lahman-ids)]
           [id (runs-per-game-for-team-since id start-year)])))
-
-(defn mean [coll]
-  (when (seq coll)
-    (/ (reduce + coll) (count coll))))
-
-(defn sq [x] (* x x))
-
-(defn standard-dev [coll]
-  (when (seq coll)
-    (let [mu (mean coll)]
-      (Math/sqrt
-       (double
-        (/ (reduce + (map (fn [x] (sq (- x mu))) coll))
-           (count coll)))))))
 
 (defn run-data-for-teams-since [start-year]
   (into {}
