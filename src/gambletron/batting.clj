@@ -40,6 +40,10 @@
 (defconst homeruns-by-batters :HR)
 (defconst triples (keyword "3B"))
 
+(defn batting-avg [batting-map]
+  (/ (hits-by-batters batting-map)
+     (at-bats batting-map)))
+
 ;; how often a batter reaches base
 (defn on-base-percentage [{:keys [H BB HBP AB SF] :as batting-map}]
   (/ (+ H BB HBP)
@@ -47,11 +51,11 @@
 
 ;; power of a hitter
 (defn slugging-percentage [batting-map]
-  (+ (hits-by-batters batting-map)
-     (:2B batting-map)
-     (* 2 (triples batting-map))
-     (/ (* 3 (homeruns-by-batters batting-map)) 
-        (at-bats batting-map))))
+  (/ (+ (hits-by-batters batting-map)
+        (* 2 (:doubles batting-map))
+        (* 3 (:triples batting-map))
+        (* 4 (homeruns-by-batters batting-map)))
+     (at-bats batting-map)))
 
 (defn walks [batting-data]
   (+ (:BB batting-data)
@@ -85,9 +89,51 @@
 (defn get-batting-data [player-map]
   (assoc
    (combine-batting-data
-    (select batting (where {:player-id (:id player-map)})))
+    (select batting (where {:player-id (:id player-map)
+                            :year-id 2014})))
    :player-id (:id player-map)))
 
+(defn top-sluggers-for-team [team-map]
+  (->> team-map
+       find-all-by-team
+       (filter (comp pos? :AB))
+       (sort-by (comp - slugging-percentage))))
+
+(defn top-batting-avg-for-team [team-map]
+  (->> team-map
+       find-all-by-team
+       (filter (comp pos? :AB))
+       (sort-by (comp - batting-avg))))
+
+(defn top-obp-for-team [team-map]
+  (->> team-map
+       find-all-by-team
+       (filter (comp pos? :AB))
+       (sort-by (comp - on-base-percentage))))
+
+(defn- lineup-order [player-maps]
+  [(nth player-maps 1)
+   (nth player-maps 4)
+   (nth player-maps 2)
+   (nth player-maps 5)
+   (nth player-maps 3)
+   (nth player-maps 6)
+   (nth player-maps 7)
+   (nth player-maps 8)
+   (nth player-maps 0)])
+
+(defn filter-lineup [player-maps]
+  (let [lineup-ids (->> player-maps
+                        (map get-batting-data)
+                        (filter (comp pos? :AB))
+                        ;; (sort-by on-base-percentage)
+                        ;; (sort-by slugging-percentage)
+                        (sort-by batting-avg)
+                        (take-last 9)
+                        (map :player-id))]
+    (lineup-order
+     (for [id (reverse lineup-ids)]
+       {:id id}))))
 
 (defn no-out-transition-submatrix [batting-data]
   [[(:HR batting-data)

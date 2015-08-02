@@ -1,5 +1,6 @@
 (ns gambletron.markov
   (:require [clojure.core.matrix :as matrix]
+            [clojure.math.combinatorics :as combinatorics]
             [taoensso.timbre.profiling :as profiling :refer (pspy pspy* profile defnp p p*)]
             (gambletron [batting :as batting]
                         [pitching :as pitching]
@@ -17,11 +18,11 @@
   {:id player-id})
 
 (defn- remove-pitchers [team player-ids]
-  ;; (if-not false ;; (team/designated-hitter-rule? team)
-  ;;   player-ids
   (p :remove-pitchers
-     (remove (set (map :player-id (pitching/find-by-team-year team)))
-             player-ids)))
+     (if-not (team/designated-hitter-rule? team)
+       player-ids
+       (remove (set (map :player-id (pitching/find-by-team-year team)))
+               player-ids))))
 
 (defn- players-for-team [team-map]
   (p :players-for-team
@@ -36,8 +37,9 @@
   (p :transition-matrices-for-team
      (->> team-map
           players-for-team
+          batting/filter-lineup
           (map batting/transition-matrix))))
-  
+
 (defn- components-from-row [row components]
   (p :components-from-row
      (vec
@@ -261,34 +263,53 @@
 (def overtime-game-state (vec (cons initial-state
                                     (repeat 20
                                             (vec (repeat 25 0))))))
+(def training-game-state (vec (cons initial-state
+                                    (repeat 20 ;;(- (* 1 21) 1)
+                                            (vec (repeat 25 0))))))
 
 
 (defn- done? [state-matrix]
   (p :done?
-     (>= (sum (take-last 21 (map last state-matrix)))
-         0.999)))
+     (> (sum (take-last 21 (map last state-matrix)))
+        0.998)))
+
+(defn compute-for-lineup
+  "Produces the distribution of runs for the team, in the form of a
+  vector. So `(nth (compute-for-team my-team) 3)` would get the
+  probability of scoring (- 3 1) points."
+  [transition-matrices game-state-matrix]
+  (p :compute-for-lineup
+     (loop [[batter & remaining-team] (cycle transition-matrices)
+            state-matrix game-state-matrix
+            k 0]
+       (if (or (> k 150) (done? state-matrix))
+         (->> (next-state state-matrix (first remaining-team))
+              update-innings
+              (map last)
+              (take-last 21))
+         (recur remaining-team
+                (update-innings (next-state state-matrix batter))
+                (inc k))))))
 
 (defn compute-for-team
   "Produces the distribution of runs for the team, in the form of a
   vector. So `(nth (compute-for-team my-team) 3)` would get the
   probability of scoring (- 3 1) points."
   [team-map]
+  (println (:name team-map))
   (p :compute-for-team
-     (loop [[batter & remaining-team] (cycle (transition-matrices-for-team team-map))
-            state-matrix initial-game-state]
-       (if (done? state-matrix)
-         (take-last 21 (map last state-matrix))
-         (recur remaining-team
-                (update-innings (next-state state-matrix batter)))))))
+     (compute-for-lineup (transition-matrices-for-team team-map) initial-game-state)))
 
 (defn overtime-distr [team-map]
   (p :compute-for-team
      (loop [[batter & remaining-team] (cycle (transition-matrices-for-team team-map))
-            state-matrix overtime-game-state]
-       (if (done? state-matrix)
+            state-matrix overtime-game-state
+            k 0]
+       (if (or (> k 100) (done? state-matrix))
          (map last state-matrix)
          (recur remaining-team
-                (update-innings (next-state state-matrix batter)))))))
+                (update-innings (next-state state-matrix batter))
+                (inc k))))))
 
 (defn- probability-win
   "Returns the probability team-a will win against team-b without extra innings"
@@ -328,19 +349,54 @@
                              team-b-overtime-distr)))
      :extra-innings? (and (< (probability-win team-a-distr team-b-distr) 0.5)
                           (< (probability-win team-b-distr team-a-distr) 0.5))
-     :team-a-score (expected-number-of-runs
-                    (mapv +
-                          team-a-distr
-                          (mapv #(* (Math/sqrt prob-overtime) %)
-                                team-a-overtime-distr)
-                          (mapv #(* (Math/sqrt (/ (* prob-overtime prob-super-overtime)
-                                                  (- 1 prob-super-overtime))) %)
-                                team-a-overtime-distr)))
-     :team-b-score (expected-number-of-runs
-                    (mapv +
-                          team-b-distr
+     :team-a-score (+ (expected-number-of-runs team-a-distr)
+                      (expected-number-of-runs
+                       (mapv +
+                             (mapv #(* (Math/sqrt prob-overtime) %)
+                                   team-a-overtime-distr)
+                             (mapv #(* (Math/sqrt (/ (* prob-overtime prob-super-overtime)
+                                                     (- 1 prob-super-overtime))) %)
+                                   team-a-overtime-distr))))
+     :team-b-score (+
+                    (expected-number-of-runs team-b-distr)
+                    (expected-number-of-runs
+                     (mapv +
                           (mapv #(* (Math/sqrt prob-overtime) %)
                                 team-b-overtime-distr)
                           (mapv #(* (Math/sqrt (/ (* prob-overtime prob-super-overtime)
                                                   (- 1 prob-super-overtime))) %)
-                                team-b-overtime-distr)))}))
+                                team-b-overtime-distr))))}))
+;;; trying to optimize batting order
+(defn- lineup-candidates [team-map]
+  (->> (concat (take 9 (batting/top-obp-for-team team-map))
+               (take 9 (batting/top-batting-avg-for-team team-map))
+               (take 9 (batting/top-sluggers-for-team team-map)))
+       set
+       (map (comp make-pseudo-player :player-id))
+       (#(combinatorics/combinations % 9))))
+
+(defn- runs-for-lineup [batting-lineup]
+  (->> batting-lineup
+       (map batting/transition-matrix)
+       (#(compute-for-lineup % training-game-state))
+       expected-number-of-runs))
+
+;; 220 combinations, 1 inning: 253 seconds
+;; 2002 combinations, 1 inning: 3187 seconds
+;; 220 combinations, 2 innings: 791 seconds
+;; 220 combinations, 3 innings: 1547 seconds
+(defn- optimal-batting-order [team-map]
+  (->> team-map
+       lineup-candidates
+       (sort-by (comp - runs-for-lineup))
+       first))
+
+(def optimal-LAA-order [{:id "hamiljo03"}
+                        {:id "troutmi01"}
+                        {:id "kendrho01"}
+                        {:id "iannech01"}
+                        {:id "pujolal01"}
+                        {:id "cowgico01"}
+                        {:id "croncj01"}
+                        {:id "stewaia01"}
+                        {:id "calhoko01"}])
