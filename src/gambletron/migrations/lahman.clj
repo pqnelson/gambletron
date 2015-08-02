@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure-csv.core :as csv]
             [clj-time.format :as f]
+            [clj-time.core :as time]
             [korma.db :as db]
             (gambletron [util :as util]
                         [schema :as schema]
@@ -18,6 +19,16 @@
   (when (string? s)
     (or (= s (re-find #"\d{4}-\d{1,2}-\d{1,2}" s))
         (= s (re-find #"\d{1,2}/\d{1,2}/\d{4}" s)))))
+
+
+(def multi-parser (f/formatter (time/default-time-zone)
+                               "dd-YYYY-MM"
+                               "MM/dd/YYYY"
+                               "YYYY-MM-dd"))
+
+(defn- parse-date [final-game]
+  (when-not (string/blank? final-game)
+    (f/parse multi-parser final-game)))
 
 (defn- string-resembles-int? [s]
   (and (string? s)
@@ -38,17 +49,6 @@
 (defn parse-double [x]
   (when (string-resembles-float? x)
     (Double/parseDouble x)))
-
-(defn parse-date
-  "Produces an RFC3339 string YYYY-MM-DD. See http://tools.ietf.org/html/rfc3339"
-  [x]
-  (when (string-resembles-date? x)
-    (let [date-pattern (if (= x (re-find #"\d{4}-\d{1,2}-\d{1,2}" x)) #"-" #"/")
-          [month day year] (string/split x date-pattern)]
-      (format "%d-%02d-%02d"
-              (parse-int year)
-              (parse-int month)
-              (parse-int day)))))
 
 (def ^:dynamic *blank-is-zero?* false)
 
@@ -115,14 +115,46 @@
 (defn populate-pitching []
   (populate-table "Pitching.csv" pitching/create transform-id-keys))
 
+(defn- birthday [{:keys [birthYear birthMonth birthDay] :as player-map}]
+  (if (and birthYear birthMonth birthDay)
+    (time/date-time birthYear birthMonth birthDay)
+    (println "Passed" player-map)))
+
+(defn- died [{:keys [deathYear deathMonth deathDay]}]
+  (when (and deathYear deathMonth deathDay)
+    (time/date-time deathYear deathMonth deathDay)))
+
+(defn- assoc-player-id [player-map]
+  (if (:id player-map)
+    player-map
+    (assoc player-map :id (:lahman-id player-map))))
+
 (defn- transform-player-keys [player-map]
-  (util/rename-keys player-map
-                    {:retroID :retro-id
-                     :bbrefID :bbref-id
-                     :playerID :id}))
+  (-> player-map
+      (util/rename-keys {:retroID :id
+                         :birthCity :birth-city
+                         :birthCountry :birth-country
+                         :birthState :birth-state
+                         :deathCity :death-city
+                         :deathCountry :death-country
+                         :deathState :death-state
+                         :bbrefID :bbref-id
+                         :playerID :lahman-id
+                         :nameLast :last-name
+                         :nameFirst :first-name
+                         :nameGiven :given-name})
+      assoc-player-id
+      (assoc :birthday (birthday player-map))
+      (assoc :final-game (when (:finalGame player-map)
+                           (attempt-parse-date (:finalGame player-map))))
+      (assoc :debut (when (:debut player-map)
+                      (attempt-parse-date (:debut player-map))))
+      (assoc :died (died player-map))
+      (dissoc :birthYear :birthMonth :birthDay :finalGame
+              :deathYear :deathMonth :deathDay)))
 
 (defn populate-player []
-  (populate-table "Master.csv" player/create (comp schema/transform-player transform-player-keys)))
+  (populate-table "Master.csv" (comp player/create schema/prepare-player) (comp util/dash-keys transform-player-keys)))
 
 (defn- transform-team-keys [team-map]
   (util/rename-keys team-map
