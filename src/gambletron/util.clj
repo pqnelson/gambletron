@@ -1,6 +1,30 @@
 (ns gambletron.util
   (:require [clojure.pprint :as pprint]
-            [clojure.string :as string]))
+            [clojure.string :as string])
+  (:import [java.util UUID]))
+
+(defn generate-uuid ^UUID []
+  (UUID/randomUUID))
+
+(defn uuid? [obj]
+  (instance? java.util.UUID obj))
+
+(defn uuid->string ^String [uuid]
+  (string/replace
+   (if (uuid? uuid) (.toString uuid) uuid)
+   "-" ""))
+
+(defn string->uuid ^UUID [^String s]
+  (UUID/fromString
+   (str (subs s 0 8)
+        "-"
+        (subs s 8 12)
+        "-"
+        (subs s 12 16)
+        "-"
+        (subs s 16 20)
+        "-"
+        (subs s 20))))
 
 (defmacro defconst [const-name const-val]
   `(def
@@ -34,7 +58,8 @@
          2)
       (nth sorted-coll mid))))
 
-(defn sq [x] (* x x))
+(defmacro sq [x] `(* ~x ~x))
+(defmacro cube [x] `(* ~x ~x ~x))
 
 ;; See Knuth, TAOCP vol 2, 3d ed, pg 232
 (defn- online-variance [coll]
@@ -71,15 +96,15 @@
     (Math/sqrt (variance coll))))
 
 ;; record helpers
-(defn static? [field]
+(defn static? [^java.lang.reflect.Field field]
   (java.lang.reflect.Modifier/isStatic
    (.getModifiers field)))
 
-(defn get-record-field-names [record]
+(defn get-record-field-names [^Class record]
   (->> record
        .getDeclaredFields
        (remove static?)
-       (map #(.getName %))
+       (map (fn [^java.lang.reflect.Field f] (.getName f)))
        (remove #{"__meta" "__extmap"})))
 
 (defmacro empty-record [record]
@@ -111,10 +136,15 @@
 (defn map-vals [f m]
   (zipmap (keys m) (map f (vals m))))
 
+(defn demunge [^String s]
+  (clojure.lang.Compiler/demunge s))
+
+;; TODO: consider using demunge instead?
 ;; key-renaming helpers
 (defn snake->kabob [^String s]
   (.replaceAll s "_" "-"))
 
+;; Consider using (munge s) instead?
 (defn kabob->snake [^String s]
   (.replaceAll s "-" "_"))
 
@@ -131,3 +161,30 @@
         (for [[k v] map]
           [(keyword (kabob->snake (name k))) v])))
 
+;; From https://gist.github.com/cemerick/747395
+(defn- mutable-memoize
+  [f ^java.util.Map map]
+  (fn [& args]
+    (if-let [e (find map args)]
+      (val e)
+      (let [ret (apply f args)]
+        (.put map args ret)
+        ret))))
+
+(defn soft-memoize
+  [f]
+  (let [m (java.util.concurrent.ConcurrentHashMap.)
+        rq (java.lang.ref.ReferenceQueue.)
+        memoized (mutable-memoize
+                   #(java.lang.ref.SoftReference. (apply f %&) rq)
+                   m)]
+    (fn clear-fn [& args]
+      ; clearCache conveniently exists to poll the queue and scrub a CHM
+      ; used in Clojure's Keyword and DynamicClassLoader, so it's not going anywhere
+      (clojure.lang.Util/clearCache rq m)
+      (let [^java.lang.ref.SoftReference ref (apply memoized args)
+            val (.get ref)]
+        (if (.isEnqueued ref)
+          ; reference enqueued since our clearCache call above, retry
+          (apply clear-fn args)
+          val)))))

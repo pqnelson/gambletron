@@ -82,7 +82,7 @@ CREATE TABLE player(
 CREATE INDEX player_last_name_idx ON player (nameLast);
 
 CREATE TABLE batting(
-       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
        player_id TEXT NOT NULL,
        year_id INTEGER NOT NULL,
        stint INTEGER NOT NULL,

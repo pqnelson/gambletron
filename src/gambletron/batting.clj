@@ -23,6 +23,7 @@
 (defn find-by-year [year]
   (select batting (where {:year-id year})))
 
+
 (defn find-all-by-player [player-id]
   (select batting (where {:player-id player-id})))
 
@@ -52,8 +53,8 @@
 ;; power of a hitter
 (defn slugging-percentage [batting-map]
   (/ (+ (hits-by-batters batting-map)
-        (* 2 (:doubles batting-map))
-        (* 3 (:triples batting-map))
+        (* 2 (:2B batting-map))
+        (* 3 (:3B batting-map))
         (* 4 (homeruns-by-batters batting-map)))
      (at-bats batting-map)))
 
@@ -71,8 +72,8 @@
 
 (defn singles [batter]
   (- (hits-by-batters batter)
-     (:doubles batter)
-     (:triples batter)
+     (:2B batter)
+     (:3B batter)
      (:HR batter)))
 
 (defn outs [batter]
@@ -86,12 +87,29 @@
        (map #(dissoc % :id :player-id :year-id :stint :team-id :league-id))
        (apply merge-with +)))
 
-(defn get-batting-data [player-map]
+(defn find-latest-for-player [player-id]
+  (assoc (->> (select batting (where {:player-id player-id}))
+              (sort-by :year-id)
+              (take-last 3)
+              combine-batting-data)
+         :player-id
+         player-id))
+
+(defn- get-batting-data* [player-map]
   (assoc
    (combine-batting-data
-    (select batting (where {:player-id (:id player-map)
-                            :year-id 2014})))
+    (find-all-by-player (:id player-map)))
    :player-id (:id player-map)))
+
+(defonce data-cache (atom {}))
+
+(defn get-batting-data [player-map]
+  (let [k (keyword (:id player-map))]
+    (if-let [v (@data-cache k)]
+      v
+      (let [val (get-batting-data* player-map)]
+        (swap! data-cache assoc k val)
+        val))))
 
 (defn top-sluggers-for-team [team-map]
   (->> team-map
@@ -139,8 +157,8 @@
   [[(:HR batting-data)
     (+ (walks batting-data)
        (singles batting-data))
-    (:doubles batting-data)
-    (:triples batting-data)
+    (:2B batting-data)
+    (:3B batting-data)
     0
     0
     0
@@ -148,24 +166,24 @@
    [(:HR batting-data)
     0
     0
-    (:triples batting-data)
+    (:3B batting-data)
     (+ (walks batting-data)
        (singles batting-data))
     0
-    (:doubles batting-data)
+    (:2B batting-data)
     0]
    [(:HR batting-data)
     (singles batting-data)
-    (:doubles batting-data)
-    (:triples batting-data)
+    (:2B batting-data)
+    (:3B batting-data)
     (walks batting-data)
     0
     0
     0]
    [(:HR batting-data)
     (singles batting-data)
-    (:doubles batting-data)
-    (:triples batting-data)
+    (:2B batting-data)
+    (:3B batting-data)
     0
     (walks batting-data)
     0
@@ -173,23 +191,23 @@
    [(:HR batting-data)
     0
     0
-    (:triples batting-data)
+    (:3B batting-data)
     (singles batting-data)
     0
-    (:doubles batting-data)
+    (:2B batting-data)
     (walks batting-data)]
    [(:HR batting-data)
     0
     0
-    (:triples batting-data)
+    (:3B batting-data)
     (singles batting-data)
     0
-    (:doubles batting-data)
+    (:2B batting-data)
     (walks batting-data)]
    [(:HR batting-data)
     (singles batting-data)
-    (:doubles batting-data)
-    (:triples batting-data)
+    (:2B batting-data)
+    (:3B batting-data)
     0
     0
     0
@@ -197,10 +215,10 @@
    [(:HR batting-data)
     0
     0
-    (:triples batting-data)
+    (:3B batting-data)
     (singles batting-data)
     0
-    (:doubles batting-data)
+    (:2B batting-data)
     (walks batting-data)]])
 
 (defn- one-out-transition-matrix [batting-data]
@@ -237,10 +255,9 @@
   (let [sum (reduce + row-vector)]
     (mapv #(/ % sum) row-vector)))
 
-;; Produces a 25-by-25 matrix
-(defn transition-matrix [player-map]
-  (let [batting-data (get-batting-data player-map)
-        PA (plate-appearances batting-data)]
+
+(defn transition-matrix [batting-data]
+  (let [PA (plate-appearances batting-data)]
     (with-meta
       (if (zero? PA)
         (matrix/zero-matrix 25 25)
@@ -262,4 +279,20 @@
                             (no-out-transition-submatrix batting-data)
                             (two-to-three-out-submatrix batting-data))
                        [(conj (vec (repeat 24 0)) 1)]))))
-      {:player-id (:id player-map)})))
+      {:player-id (:player-id batting-data)})))
+
+(defn league-average [year]
+  (when-let [player-ids (seq
+                         (set (map :player-id (select schema/rosters
+                                                      (where {:year year})))))]
+    (let [results (select batting
+                          (where {:player-id [in player-ids]
+                                  :G [> 20]}))]
+      (util/map-vals
+       #(double (/ % (count results)))
+       (combine-batting-data
+        results)))))
+
+;; Produces a 25-by-25 matrix
+(defn player->transition-matrix [player-map]
+  (transition-matrix (get-batting-data player-map)))

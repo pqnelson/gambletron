@@ -5,6 +5,7 @@
             [clojure-csv.core :as csv]
             [clj-time.format :as f]
             [clj-time.core :as time]
+            [korma.core :as korma]
             [korma.db :as db]
             (gambletron [util :as util]
                         [schema :as schema]
@@ -18,8 +19,8 @@
 (defn- string-resembles-date? [s]
   (when (string? s)
     (or (= s (re-find #"\d{4}-\d{1,2}-\d{1,2}" s))
+        (= s (re-find #"\d{2}-\d{4}-\d{2}" s))
         (= s (re-find #"\d{1,2}/\d{1,2}/\d{4}" s)))))
-
 
 (def multi-parser (f/formatter (time/default-time-zone)
                                "dd-YYYY-MM"
@@ -27,7 +28,7 @@
                                "YYYY-MM-dd"))
 
 (defn- parse-date [final-game]
-  (when-not (string/blank? final-game)
+  (when (string-resembles-date? final-game)
     (f/parse multi-parser final-game)))
 
 (defn- string-resembles-int? [s]
@@ -93,27 +94,181 @@
 (defn load-data [filename]
   (load-data* (str (path-to-latest-lahman-data) "/" filename)))
 
+(def lahman-lookup (atom nil))
+
+(defn- reset-lahman-lookup! []
+  (let [results (korma/exec-raw ["SELECT id,lahman_id FROM player"
+                                 []] :results)]
+    (reset! lahman-lookup
+            (into {}
+                  (for [row results]
+                    [(:lahman-id row) (:id row)])))))
+
+(defn translate-player-id* [player-id]
+  {:post [(or (not *player-id-needed?*)
+              (not (string/blank? %)))]}
+  ((or @lahman-lookup
+       (do (reset-lahman-lookup!)
+           @lahman-lookup))
+       player-id))
+
+(def ^:dynamic *player-id-needed?* false)
+
+(defn translate-player-id [{:keys [player-id] :as m}]
+  (if player-id
+    (assoc m :player-id (translate-player-id* (:player-id m)))
+    (when-not *player-id-needed?*
+      m)))
+
+(def ^:dynamic *team-id-needed?* false)
+
+(def team-ids (set (map :team-id (korma/exec-raw ["SELECT team_id FROM teams" []] :results))))
+
+(defn- translate-lahman-team-id [{:keys [team-id] :as m}]
+  (if (#{"LAA"} team-id)
+    (assoc m :team-id "ANA")
+    (if (team-ids team-id)
+      m
+      (when (> (:year-id m) 2000) (println "CANNOT FIND:" team-id)))))
+
+(defn filter-team-id [maps]
+  (let [ids (set (map :team-id (korma/exec-raw ["SELECT team_id FROM teams" []] :results)))]
+    (if-not *team-id-needed?*
+      maps
+      (filter (comp ids :team-id)
+              (map translate-lahman-team-id maps)))))
+
 ;;; utility functions to transform the data to populate the database
-(defn- populate-table [file-name create-fn transform-fn]
-  (let [data (map transform-fn (load-data file-name))
+(defn- populate-table
+  [file-name create-fn transform-fn & [{:keys [check-fn] :or {check-fn
+                                                             (constantly
+                                                              true)}}]]
+  (let [data (filter-team-id (map transform-fn (load-data file-name)))
         pph (quot (count data) 100)]
-  (doseq [[i row] (map list (rest (range)) data)]
-    (when (zero? (mod i (* 5 pph)))
-      (println (quot i pph) "%"))
-    (create-fn row))))
+    (doseq [[i row] (map list (rest (range)) data)]
+      (when (#{"troutmi01" "troum001"} (:player-id row))
+        (println row)
+        (when-not (check-fn row)
+          (println "Will not be added to the database...")))
+      (when (check-fn row)
+        (when (zero? (mod i (* 5 pph)))
+          (println (quot i pph) "%"))
+        (create-fn row)))))
 
 (defn- transform-id-keys [data-map]
   (util/rename-keys data-map
-                    {:playerID :player-id
+                    {:IPouts :IPOuts
+                     :playerID :player-id
                      :yearID :year-id
                      :teamID :team-id
                      :lgID :league-id}))
 
+(defn make-batting-table []
+  (try
+  (korma/exec-raw [(str "CREATE TABLE batting("
+                        "       id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),"
+                        "       player_id TEXT NOT NULL REFERENCES player(id),"
+                        "       year_id INTEGER NOT NULL,"
+                        "       stint INTEGER NOT NULL,"
+                        "       team_id TEXT NOT NULL REFERENCES teams(team_id),"
+                        "       league_id TEXT NOT NULL,"
+                        "       \"G\" INT DEFAULT 0,"
+                        "       \"AB\" INT DEFAULT 0,"
+                        "       \"R\" INT DEFAULT 0,"
+                        "       \"H\" INT DEFAULT 0,"
+                        "       \"2B\" INT DEFAULT 0,"
+                        "       \"3B\" INT DEFAULT 0,"
+                        "       \"HR\" INT DEFAULT 0,"
+                        "       \"RBI\" INT DEFAULT 0,"
+                        "       \"SB\" INT DEFAULT 0,"
+                        "       \"CS\" INT DEFAULT 0,"
+                        "       \"BB\" INT DEFAULT 0,"
+                        "       \"SO\" INT DEFAULT 0,"
+                        "       \"IBB\" INT DEFAULT 0,"
+                        "       \"HBP\" INT DEFAULT 0,"
+                        "       \"SH\" INT DEFAULT 0,"
+                        "       \"SF\" INT DEFAULT 0,"
+                        "       \"GIDP\" INT DEFAULT 0"
+                        "       );")
+                   []])
+  (catch Exception e
+    (println (.getNextException e)))))
+
+(defn- check-batting [batting-row]
+  (empty? (korma/select
+           schema/batting
+           (korma/where {:year-id (:year-id batting-row)
+                         :stint (:stint batting-row)
+                         :player-id (:player-id batting-row)
+                         :team-id (:team-id batting-row)}))))
+
 (defn populate-batting []
-  (populate-table "Batting.csv" batting/create (comp schema/transform-batting transform-id-keys)))
+  (binding [*blank-is-zero?* true
+            *player-id-needed?* true
+            *team-id-needed?* true]
+    (populate-table "Batting.csv"
+                    batting/create
+                    (comp translate-player-id util/dissoc-nils transform-id-keys)
+                    {:check-fn check-batting})))
+
+(defn make-pitching-table []
+  (try
+  (korma/exec-raw [(str
+                    "CREATE TABLE pitching("
+                    "       id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),"
+                    "       player_id TEXT NOT NULL  REFERENCES player(id),"
+                    "       year_id INTEGER NOT NULL,"
+                    "       stint INTEGER NOT NULL,"
+                    "       team_id TEXT NOT NULL  REFERENCES teams(team_id),"
+                    "       league_id TEXT NOT NULL,"
+                    "       \"W\" INT DEFAULT 0,"
+                    "       \"L\" INT DEFAULT 0,"
+                    "       \"G\" INT DEFAULT 0,"
+                    "       \"GS\" INT DEFAULT 0,"
+                    "       \"CG\" INT DEFAULT 0,"
+                    "       \"SHO\" INT DEFAULT 0,"
+                    "       \"SV\" INT DEFAULT 0,"
+                    "       \"IPOuts\" INT DEFAULT 0,"
+                    "       \"H\" INT DEFAULT 0,"
+                    "       \"ER\" INT DEFAULT 0,"
+                    "       \"HR\" INT DEFAULT 0,"
+                    "       \"BB\" INT DEFAULT 0,"
+                    "       \"SO\" INT DEFAULT 0,"
+                    "       \"BAOpp\" REAL,"
+                    "       \"ERA\" REAL,"
+                    "       \"IBB\" INT DEFAULT 0,"
+                    "       \"WP\" INT DEFAULT 0,"
+                    "       \"HBP\" INT DEFAULT 0,"
+                    "       \"BK\" INT DEFAULT 0,"
+                    "       \"BFP\" INT DEFAULT 0,"
+                    "       \"GF\" INT DEFAULT 0,"
+                    "       \"R\" INT DEFAULT 0,"
+                    "       \"SH\" INT DEFAULT 0,"
+                    "       \"SF\" INT DEFAULT 0,"
+                    "       \"GIDP\" INT DEFAULT 0"
+                    "       );")
+                   []])
+  (catch Exception e
+    (println (.getNextException e)))))
+
+(defn- check-pitching [pitching-row]
+  (empty? (korma/select
+           schema/pitching
+           (korma/where {:year-id (:year-id pitching-row)
+                         :stint (:stint pitching-row)
+                         :player-id (:player-id pitching-row)
+                         :team-id (:team-id pitching-row)}))))
 
 (defn populate-pitching []
-  (populate-table "Pitching.csv" pitching/create transform-id-keys))
+  (binding [*blank-is-zero?* true
+            *player-id-needed?* true
+            *team-id-needed?* true]
+    (populate-table "Pitching.csv"
+                    pitching/create
+                    (comp translate-player-id
+                          util/dissoc-nils
+                          transform-id-keys)
+                    {:check-fn check-pitching})))
 
 (defn- birthday [{:keys [birthYear birthMonth birthDay] :as player-map}]
   (if (and birthYear birthMonth birthDay)
@@ -146,9 +301,9 @@
       assoc-player-id
       (assoc :birthday (birthday player-map))
       (assoc :final-game (when (:finalGame player-map)
-                           (attempt-parse-date (:finalGame player-map))))
+                           (parse-date (:finalGame player-map))))
       (assoc :debut (when (:debut player-map)
-                      (attempt-parse-date (:debut player-map))))
+                      (parse-date (:debut player-map))))
       (assoc :died (died player-map))
       (dissoc :birthYear :birthMonth :birthDay :finalGame
               :deathYear :deathMonth :deathDay)))

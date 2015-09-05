@@ -378,7 +378,7 @@
 (defn- runs-for-lineup [batting-lineup]
   (->> batting-lineup
        (map batting/transition-matrix)
-       (#(compute-for-lineup % training-game-state))
+       (#(compute-for-lineup % initial-game-state))
        expected-number-of-runs))
 
 ;; 220 combinations, 1 inning: 253 seconds

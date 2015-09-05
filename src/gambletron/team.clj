@@ -1,37 +1,37 @@
 (ns gambletron.team
   (:require [korma.core :refer [insert select set-fields where values] :as korma]
-            [gambletron.schema :refer [team] :as schema]
+            [gambletron.schema :refer [teams] :as schema]
             [gambletron.util :refer [mean standard-dev]]))
 
 (defn create [team-map]
-  (insert team (values team-map)))
+  (insert teams (values team-map)))
 
 (defn update [team-map changes]
-  (korma/update team
+  (korma/update teams
                 (set-fields changes)
-                (where {:id (:id team-map)})))
+                (where {:team-id (:team-id team-map)})))
 
 (defn delete [team-map]
-  (korma/delete team
-                (where {:id (:id team-map)})))
+  (korma/delete teams
+                (where {:team-id (:team-id team-map)})))
 
 (defn find-all []
-  (select team))
+  (select teams))
 
 (defn find-by-id [id]
   (first
-   (select team (where {:id id}))))
+   (select teams (where {:team-id id}))))
 
 (defn find-by-lahman-id [lahman-id]
   (first
-   (select team (where {:lahman-id lahman-id
+   (select teams (where {:lahman-id lahman-id
                         :year-id 2014}))))
 
 (defn find-by-lahman-ids [lahman-ids]
-  (select team (where {:lahman-id [in lahman-ids]}))) 
+  (select teams (where {:lahman-id [in lahman-ids]}))) 
 
 (defn find-since [year]
-  (select team (where {:year-id [> year]})))
+  (select teams (where {:year-id [> year]})))
 
 (defonce current-teams-cache (atom nil))
 
@@ -43,7 +43,7 @@
 
 (defn current-team-lahman-ids []
   (map :lahman-id
-       (select team (where {:year-id 2014}))))
+       (select teams (where {:year-id 2014}))))
 
 (defn runs-per-game [team-map]
   (/ (:runs team-map)

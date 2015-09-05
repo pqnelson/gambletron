@@ -7,7 +7,6 @@
             [korma.db :refer :all]
             [gambletron.util :refer [defconst] :as util]))
 
-
 (def db-dir (str (System/getProperty "user.dir") "/resources/"))
 
 (defn- underscores->dashes [n]
@@ -42,7 +41,7 @@
   (when sql-date
     (coerce/from-sql-date sql-date)))
 
-(declare batting pitching fielding player team events)
+(declare batting pitching fielding player teams events)
 
 (defrecord Player [id
                    birthday
@@ -84,101 +83,97 @@
 
 (defentity player
   (entity-fields :id :birthday :birth_country :birth_state :birth_city
-                 :died :death_country :death_state :death_City 
+                 :died :death_country :death_state :death_city 
                  :first_name :last_name :given_name :weight :height :bats
                  :throws :debut :final_game :lahman_id :bbref_id) 
   (pk :id)
   (prepare prepare-player)
   (transform transform-player))
 
-;; (defrecord Batting [id
-;;                     player-id
-;;                     year-id
-;;                     stint
-;;                     team-id
-;;                     league-id
-;;                     G ; games
-;;                     AB ; at bats
-;;                     R ; runs
-;;                     H ; hits
-;;                     doubles
-;;                     triples
-;;                     HR ; homeruns
-;;                     RBI ; runs batted in
-;;                     SB ; stolen bases
-;;                     CS ; caught stealing
-;;                     BB ; base on balls
-;;                     SO ; strikeouts
-;;                     IBB ; intentional walks
-;;                     HBP ; hit by pitch
-;;                     SH ; sacrifice hits
-;;                     SF ; sacrifice flies
-;;                     GIDP]) ; grounded into double plays
+(defrecord Batting [id
+                    player-id
+                    year-id
+                    stint
+                    team-id
+                    league-id
+                    G ; games
+                    AB ; at bats
+                    R ; runs
+                    H ; hits
+                    HR ; homeruns
+                    RBI ; runs batted in
+                    SB ; stolen bases
+                    CS ; caught stealing
+                    BB ; base on balls
+                    SO ; strikeouts
+                    IBB ; intentional walks
+                    HBP ; hit by pitch
+                    SH ; sacrifice hits
+                    SF ; sacrifice flies
+                    GIDP]) ; grounded into double plays
 
-;; (defn prepare-batting [v]
-;;   (-> v
-;;       util/underscore-keys
-;;       (util/rename-keys {:doubles :2B, :triples :3B})))
+(defn prepare-batting [v]
+  (-> v
+      util/underscore-keys))
 
-;; (defn transform-batting [v]
-;;   (-> v
-;;       util/dash-keys
-;;       (util/rename-keys {:2B :doubles, :3B :triples})
-;;       map->Batting))
+(defn transform-batting [v]
+  (-> v
+      util/dash-keys
+      map->Batting))
 
-;; (defentity batting
-;;   (entity-fields :id :player_id :year_id :stint :team_id :league_id :G
-;;   :AB :R :H :2B :3B :HR :RBI :SB :CS :BB :SO :IBB :HBP :SH :SF :GIDP) 
-;;   (pk :id)
-;;   (prepare prepare-batting)
-;;   (transform transform-batting)
-;;   (belongs-to player))
+(defentity batting
+  (entity-fields :id :player_id :year_id :stint :team_id :league_id :G
+  :AB :R :H :2B :3B :HR :RBI :SB :CS :BB :SO :IBB :HBP :SH :SF :GIDP) 
+  (pk :id)
+  (prepare prepare-batting)
+  (transform transform-batting)
+  (belongs-to player))
 
-;; (defrecord Pitching [id
-;;                      player-id
-;;                      year-id
-;;                      stint
-;;                      team-id
-;;                      league-id
-;;                      W ; wins
-;;                      L ; losses
-;;                      G ; games
-;;                      GS ; games started
-;;                      CG ; complete games 
-;;                      SHO ; shutouts 
-;;                      SV ; saves
-;;                      IPOuts ; Outs pitched (innings pitched * 3)
-;;                      H ; hits
-;;                      ER ; earned runs
-;;                      HR ; homeruns
-;;                      BB ; walks
-;;                      SO ; strikeouts
-;;                      BAOpp ; opponent's batting average
-;;                      ERA ; earned run average
-;;                      IBB ; intentional walks
-;;                      WP ; wild pitches
-;;                      HBP ; batters hit by pitch
-;;                      BK ; balks
-;;                      BFP ; batters faced by pitcher
-;;                      GF ; games finished
-;;                      R ; runs allowed
-;;                      SH ; sacrifices by opposing batters
-;;                      SF ; sacrifice flies by opposing batters
-;;                      GIDP]) ; grounded into double plays by opposing batter
+(defrecord Pitching [id
+                     player-id
+                     year-id
+                     stint
+                     team-id
+                     league-id
+                     W ; wins
+                     L ; losses
+                     G ; games
+                     GS ; games started
+                     CG ; complete games 
+                     SHO ; shutouts 
+                     SV ; saves
+                     IPOuts ; Outs pitched (innings pitched * 3)
+                     H ; hits
+                     ER ; earned runs
+                     HR ; homeruns
+                     BB ; walks
+                     SO ; strikeouts
+                     BAOpp ; opponent's batting average
+                     ERA ; earned run average
+                     IBB ; intentional walks
+                     WP ; wild pitches
+                     HBP ; batters hit by pitch
+                     BK ; balks
+                     BFP ; batters faced by pitcher
+                     GF ; games finished
+                     R ; runs allowed
+                     SH ; sacrifices by opposing batters
+                     SF ; sacrifice flies by opposing batters
+                     GIDP]) ; grounded into double plays by opposing batter
 
-;; (defentity pitching
-;;   (entity-fields :id :player_id :year_id :stint :team_id :league_id :W
-;;   :L :G :GS :CG :SHO :SV :IPOuts :H :ER :HR :BB :SO :BAOpp :ERA :IBB :WP
-;;   :HBP :BK :BFP :GF :R :SH :SF :GIDP) 
-;;   (pk :id)
-;;   (prepare (fn [v]
-;;              (-> v
-;;                  util/underscore-keys)))
-;;   (transform (fn [v]
-;;                (-> v
-;;                    util/dash-keys
-;;                    map->Pitching)))
-;;   (belongs-to player))
+(defentity pitching
+  (entity-fields :id :player_id :year_id :stint :team_id :league_id :W
+  :L :G :GS :CG :SHO :SV :IPOuts :H :ER :HR :BB :SO :BAOpp :ERA :IBB :WP
+  :HBP :BK :BFP :GF :R :SH :SF :GIDP) 
+  (pk :id)
+  (prepare (fn [v]
+             (-> v
+                 util/underscore-keys)))
+  (transform (fn [v]
+               (-> v
+                   util/dash-keys
+                   map->Pitching)))
+  (belongs-to player))
 
 ;; (defrecord Fielding [id
 ;;                      player-id
@@ -219,7 +214,7 @@
                  loc-team-tx
                  name-team-tx])
 
-(defentity team
+(defentity teams
   (pk :id)
   (prepare (fn [v]
              (-> v
@@ -310,9 +305,25 @@
   (prepare (fn [v]
              (Error. "Trying to save a game, not allowed!")))
   (transform transform-game)
-  (has-many team)
+  (has-many teams)
   (has-many events)
   )
+
+(defentity rosters
+  )
+
+(defn- read-int [m field]
+  (try
+    (assoc m field (read-string (field m)))
+    (catch Exception e m)))
+
+(defn- transform-event [event-map]
+  (-> event-map
+      (read-int :event-cd)
+      (read-int :event-id)))
+
+(defentity events
+  (transform transform-event))
 
 ;; Additional commands you might want to run:
 ;;
