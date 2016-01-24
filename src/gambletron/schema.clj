@@ -96,20 +96,20 @@
                     stint
                     team-id
                     league-id
-                    G ; games
-                    AB ; at bats
-                    R ; runs
-                    H ; hits
-                    HR ; homeruns
-                    RBI ; runs batted in
-                    SB ; stolen bases
-                    CS ; caught stealing
-                    BB ; base on balls
-                    SO ; strikeouts
-                    IBB ; intentional walks
-                    HBP ; hit by pitch
-                    SH ; sacrifice hits
-                    SF ; sacrifice flies
+                    G      ; games
+                    AB     ; at bats
+                    R      ; runs
+                    H      ; hits
+                    HR     ; homeruns
+                    RBI    ; runs batted in
+                    SB     ; stolen bases
+                    CS     ; caught stealing
+                    BB     ; base on balls
+                    SO     ; strikeouts
+                    IBB    ; intentional walks
+                    HBP    ; hit by pitch
+                    SH     ; sacrifice hits
+                    SF     ; sacrifice flies
                     GIDP]) ; grounded into double plays
 
 (defn prepare-batting [v]
@@ -135,30 +135,30 @@
                      stint
                      team-id
                      league-id
-                     W ; wins
-                     L ; losses
-                     G ; games
-                     GS ; games started
-                     CG ; complete games 
-                     SHO ; shutouts 
-                     SV ; saves
+                     W      ; wins
+                     L      ; losses
+                     G      ; games
+                     GS     ; games started
+                     CG     ; complete games 
+                     SHO    ; shutouts 
+                     SV     ; saves
                      IPOuts ; Outs pitched (innings pitched * 3)
-                     H ; hits
-                     ER ; earned runs
-                     HR ; homeruns
-                     BB ; walks
-                     SO ; strikeouts
-                     BAOpp ; opponent's batting average
-                     ERA ; earned run average
-                     IBB ; intentional walks
-                     WP ; wild pitches
-                     HBP ; batters hit by pitch
-                     BK ; balks
-                     BFP ; batters faced by pitcher
-                     GF ; games finished
-                     R ; runs allowed
-                     SH ; sacrifices by opposing batters
-                     SF ; sacrifice flies by opposing batters
+                     H      ; hits
+                     ER     ; earned runs
+                     HR     ; homeruns
+                     BB     ; walks
+                     SO     ; strikeouts
+                     BAOpp  ; opponent's batting average
+                     ERA    ; earned run average
+                     IBB    ; intentional walks
+                     WP     ; wild pitches
+                     HBP    ; batters hit by pitch
+                     BK     ; balks
+                     BFP    ; batters faced by pitcher
+                     GF     ; games finished
+                     R      ; runs allowed
+                     SH     ; sacrifices by opposing batters
+                     SF     ; sacrifice flies by opposing batters
                      GIDP]) ; grounded into double plays by opposing batter
 
 (defentity pitching
@@ -309,6 +309,8 @@
   (has-many events)
   )
 
+(defentity vw_games)
+
 (defentity rosters
   )
 
@@ -324,6 +326,18 @@
 
 (defentity events
   (transform transform-event))
+
+(defn to-clj-time [m fields]
+  (into m
+        (for [[k v] (select-keys m fields)
+              :when v]
+          [k (coerce/from-sql-time v)])))
+
+(defentity vw_events
+  (transform (fn [v]
+               (-> v
+                   transform-event
+                   (to-clj-time [:game-date])))))
 
 ;; Additional commands you might want to run:
 ;;
