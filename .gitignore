@@ -12,3 +12,6 @@ pom.xml.asc
 
 # Ignore autosaved drafts
 *~
+
+# Ignore the database stuff
+/resources/*
