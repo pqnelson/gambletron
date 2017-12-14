@@ -1,6 +1,7 @@
 (ns gambletron.batter-streaks
   (:require [clj-time.core :as time]
             [clj-time.coerce :as coerce]
+            [incanter.stats :as stats]
             [korma.core :as korma :refer [select where]]
             [gambletron.util :as util]
             [gambletron.retrosheet-schema :refer [events games rosters]]))
@@ -220,20 +221,21 @@
         probability (fn [runs]
                       (let [k (quot runs 2)]
                         (if (even? runs)
-                          (/ (*' 2.0
+                          (/ (*' 2
                                 (binomial (dec hits) (dec k))
                                 (binomial (dec outs) (dec k)))
                              (binomial plate-appearances hits))
-                          (double (/ (+' (*' (binomial (dec hits) k)
+                          (/ (+' (*' (binomial (dec hits) k)
                                    (binomial (dec outs) (dec k)))
                                 (*' (binomial (dec hits) (dec k))
                                    (binomial (dec outs) k)))
-                             (binomial plate-appearances hits))))))]
-    (reduce (fn [acc k]
-              (+ acc
-                 (probability k)))
-            0
-            (range 2 (inc streaks)))))
+                             (binomial plate-appearances hits)))))]
+    (double
+     (reduce (fn [acc k]
+               (+ acc
+                  (probability k)))
+             0
+             (range 2 (inc streaks))))))
 
 (defonce ww-stat-cache (atom {}))
 
@@ -256,16 +258,13 @@
                  (->> vs
                       (remove singleton?)
                       (map (fn [v] [k (ww-p-value-for-game v)])))))
-       (filter identity)
-       (remove (fn [[k v]]
-                 (Double/isNaN v)))))
+       (filter identity)))
 
 (defn slow-wald-wolfowitz-tests [data]
   (->> data
        (map (fn [[k vs]]
               [k (ww-p-value-for-game (apply concat vs))]))
-       (remove (fn [[k v]]
-                 (Double/isNaN v)))))
+       ))
 
 (defonce data-cache (atom {}))
 (defn data-for-year [year]
